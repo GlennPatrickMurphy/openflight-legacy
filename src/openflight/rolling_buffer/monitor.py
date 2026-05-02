@@ -291,9 +291,31 @@ class RollingBufferMonitor:
         return True
 
     def disconnect(self):
-        """Disconnect from radar."""
+        """Disconnect from radar.
+
+        Intentionally does NOT send a "GS" (return-to-CW) to the radar.
+        The OPS243-A firmware has a documented bug where the HOST_INT
+        pin mode flips when the radar transitions between modes at
+        runtime — see ops243.py:enter_rolling_buffer_mode and
+        CLAUDE.md "Radar Setup". The whole project relies on the radar
+        being in *persistent* rolling-buffer mode (saved to flash, see
+        scripts/hardware-test/test_rolling_buffer_persist.py).
+
+        If we send GS on shutdown:
+          1. The Python process exits, but the radar is now in CW mode.
+          2. start-kiosk.sh re-runs and configure_for_rolling_buffer()
+             sends the runtime GS→GC sequence, which trips the HOST_INT
+             firmware bug.
+          3. The sound trigger silently never fires again until the
+             OPS243-A is power-cycled (USB unplug + replug).
+
+        Leaving the radar in rolling-buffer mode at process exit is
+        therefore the correct steady-state behaviour. The OS will
+        release the serial port via radar.disconnect(), and the next
+        start-kiosk.sh starts cleanly because no mode transition is
+        required.
+        """
         self.stop()
-        self.radar.disable_rolling_buffer()
         self.radar.disconnect()
 
     def get_radar_info(self) -> dict:

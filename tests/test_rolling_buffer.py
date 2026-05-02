@@ -1784,3 +1784,73 @@ class TestSpinRailRejection:
         assert result.at_upper_rail is False, (
             "Interior peak should not flag at_upper_rail"
         )
+
+
+# =============================================================================
+# Regression test for shutdown → restart sound-trigger failure.
+#
+# Symptom (reported on real hardware): clicking "Shutdown" in the UI and then
+# re-running scripts/start-kiosk.sh leaves the OPS243-A unable to fire the
+# HOST_INT sound trigger on subsequent shots.
+#
+# Root cause: monitor.disconnect() previously sent "GS" (return-to-CW)
+# to the radar before the Python process exited. The OPS243-A firmware has
+# a documented bug where the HOST_INT pin mode switches unexpectedly when
+# transitioning between modes at runtime (see ops243.py:743 docstring and
+# CLAUDE.md "Radar Setup"). The project's whole approach is to keep the
+# radar in persistent rolling-buffer mode at all times — sending GS on
+# shutdown breaks that and the next startup hits the buggy GS→GC runtime
+# transition, so HOST_INT never fires.
+#
+# Fix: leave the radar in rolling-buffer mode on disconnect.
+# =============================================================================
+
+class TestShutdownPreservesRollingBuffer:
+    """The shutdown / disconnect path must NOT take the OPS243-A out of
+    rolling-buffer mode. Doing so triggers a documented HOST_INT firmware
+    bug that requires a power cycle to recover from.
+    """
+
+    def _make_monitor_with_mock_radar(self):
+        """Build a RollingBufferMonitor whose radar is fully mocked, so
+        disconnect() can be exercised without serial hardware.
+        """
+        from openflight.rolling_buffer import RollingBufferMonitor
+        monitor = RollingBufferMonitor(port=None, trigger_type="manual")
+        monitor.radar = MagicMock()
+        return monitor
+
+    def test_disconnect_does_not_send_GS(self):
+        """The shutdown path must not call disable_rolling_buffer (which
+        sends 'GS' to the OPS243-A and triggers the HOST_INT firmware
+        bug on the next runtime GS→GC transition).
+        """
+        monitor = self._make_monitor_with_mock_radar()
+        monitor.disconnect()
+        assert not monitor.radar.disable_rolling_buffer.called, (
+            "disconnect() must not call radar.disable_rolling_buffer() — "
+            "doing so leaves the OPS243-A in CW mode and the next "
+            "start-kiosk.sh hits the HOST_INT firmware bug"
+        )
+
+    def test_disconnect_still_closes_serial(self):
+        """disconnect() must still close the serial connection so the
+        port is freed for the next process.
+        """
+        monitor = self._make_monitor_with_mock_radar()
+        monitor.disconnect()
+        assert monitor.radar.disconnect.called, (
+            "disconnect() must close the serial port (radar.disconnect)"
+        )
+
+    def test_disconnect_stops_capture_thread(self):
+        """disconnect() must stop the capture thread before closing the
+        serial port.
+        """
+        monitor = self._make_monitor_with_mock_radar()
+        # Mark the monitor as running so .stop() actually does work.
+        monitor._running = True
+        monitor.disconnect()
+        assert monitor._running is False, (
+            "disconnect() must call stop() so the capture thread shuts down"
+        )
