@@ -608,11 +608,22 @@ def extract_launch_angle(
             if outlier.any():
                 w = w.astype(float).copy()
                 w[outlier] = w[outlier] / ops_bin_outlier_penalty
-                logger.info(
-                    "[RADC] OPS-bin penalty: %d/%d frames > %d bins from "
-                    "expected bin %d, weight /%.1f",
-                    int(outlier.sum()), len(clean_bins),
+                penalty_count = int(outlier.sum())
+                pct = 100.0 * penalty_count / len(clean_bins)
+                # When ≥50% of frames are penalized, this almost always
+                # indicates a setup problem (radar mounted off-axis or
+                # locked onto a persistent clutter source) rather than a
+                # rare outlier. Surface as WARNING so it shows up in
+                # production logs without needing to replay.
+                log_fn = logger.warning if pct >= 50.0 else logger.info
+                log_fn(
+                    "[RADC] OPS-bin penalty: %d/%d frames (%.0f%%) > %d "
+                    "bins from expected bin %d (peak bins: %s, weight "
+                    "/%.1f). High rate suggests a radar mounting or "
+                    "clutter issue — see docs/kld7-troubleshooting.md.",
+                    penalty_count, len(clean_bins), pct,
                     ops_bin_outlier_tol, ops_expected_bin,
+                    list(map(int, clean_bins)),
                     ops_bin_outlier_penalty,
                 )
         total_w = float(np.sum(w))

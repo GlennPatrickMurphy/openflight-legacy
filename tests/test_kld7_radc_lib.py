@@ -398,8 +398,6 @@ class TestProcessRadcFrame:
         return {
             "timestamp": 1000.0,
             "radc": bytes(payload),
-            "tdat": None,
-            "pdat": [],
         }
 
     def test_returns_detections_for_frame_with_tone(self):
@@ -420,7 +418,7 @@ class TestProcessRadcFrame:
         payload = bytearray(3072)
         payload[0:512] = noise_i.tobytes()
         payload[512:1024] = noise_q.tobytes()
-        frame = {"timestamp": 1000.0, "radc": bytes(payload), "tdat": None, "pdat": []}
+        frame = {"timestamp": 1000.0, "radc": bytes(payload)}
         detections = process_radc_frame(
             frame, frame_index=0, fft_size=2048, max_speed_kmh=100.0,
             cfar_threshold=12.0,
@@ -539,8 +537,6 @@ class TestOpsBinSoftAnchor:
         return {
             "timestamp": ts,
             "radc": cls._pack_payload(f1a_iq, f2a_iq),
-            "tdat": None,
-            "pdat": [],
         }
 
     @classmethod
@@ -561,8 +557,6 @@ class TestOpsBinSoftAnchor:
         return {
             "timestamp": ts,
             "radc": cls._pack_payload(noise1, noise2),
-            "tdat": None,
-            "pdat": [],
         }
 
     @classmethod
@@ -752,6 +746,48 @@ class TestOpsBinSoftAnchor:
                 "out-of-band peak should not produce a high-SNR shot"
             )
 
+    def test_majority_outlier_emits_warning(self, caplog):
+        """When ≥50% of frames trigger the OPS-bin penalty, the log
+        must be emitted at WARNING level rather than INFO so it surfaces
+        in production logs without a replay. Pattern observed in users'
+        logs: 5/5, 8/8, 3/3 frames > 25 bins from expected = setup
+        problem.
+        """
+        import logging
+        ops_speed_mph = 70.0
+        ops_bin = 1163
+
+        # Both "strong" frames sit far outside the OPS-bin tolerance,
+        # so >50% of surviving frames will be penalized.
+        frames = self._two_strong_frames(
+            ops_bin=ops_bin,
+            anchor_offset=60, anchor_angle=-10.0,
+            outlier_offset=80, outlier_angle=-12.0,
+        )
+
+        with caplog.at_level(logging.WARNING, logger="openflight.kld7.radc"):
+            extract_launch_angle(
+                frames=frames,
+                ops243_ball_speed_mph=ops_speed_mph,
+                speed_tolerance_mph=40.0,
+                impact_energy_threshold=0.5,
+                ops_bin_outlier_tol=25,
+                ops_bin_outlier_penalty=10.0,
+            )
+
+        warns = [
+            r for r in caplog.records
+            if r.levelno == logging.WARNING and "OPS-bin penalty" in r.message
+        ]
+        assert warns, (
+            "Expected a WARNING-level OPS-bin penalty log when ≥50% of "
+            f"frames are outliers; got records: {caplog.records}"
+        )
+        # Message should include the actual peak bins for diagnosis
+        assert "peak bins:" in warns[0].message
+        # And reference the troubleshooting doc
+        assert "troubleshooting" in warns[0].message
+
 
 class TestMultiBinCentroidAngle:
     """Tests for the magnitude²-weighted centroid angle aggregation
@@ -803,8 +839,6 @@ class TestMultiBinCentroidAngle:
             "radc": cls._pack_two_channel_payload(
                 signal + noise1, signal * np.exp(-1j * delta) + noise2,
             ),
-            "tdat": None,
-            "pdat": [],
         }
 
     @classmethod
@@ -836,8 +870,6 @@ class TestMultiBinCentroidAngle:
         return {
             "timestamp": 1000.0,
             "radc": cls._pack_two_channel_payload(f1, f2),
-            "tdat": None,
-            "pdat": [],
         }
 
     def test_clean_tone_centroid_matches_peak_bin(self):

@@ -203,6 +203,14 @@ class KLD7Tracker:
         errors = 0
         max_errors = 10
 
+        # Periodic stream-health logging. Both K-LD7 instances share
+        # this loop, so per-orientation Hz asymmetries (one radar
+        # delivering full 34 Hz, the other less due to USB contention)
+        # surface clearly. Logged every HEALTH_INTERVAL_S seconds.
+        HEALTH_INTERVAL_S = 10.0
+        last_health_t = time.time()
+        last_health_count = 0
+
         logger.info("[KLD7] Stream started: RADC only (3Mbaud, %s)", self.orientation)
 
         # Monkey-patch the library's _read_packet to handle short reads.
@@ -261,6 +269,23 @@ class KLD7Tracker:
                         elif frame_count == 50:
                             logger.info("[KLD7] Stream health: %d RADC frames (%s)",
                                         frame_count, self.orientation)
+
+                        # Periodic Hz log so per-orientation frame-rate
+                        # imbalances are visible in production logs.
+                        now = time.time()
+                        elapsed = now - last_health_t
+                        if elapsed >= HEALTH_INTERVAL_S:
+                            hz = (frame_count - last_health_count) / elapsed
+                            log_fn = (
+                                logger.warning if hz < 25.0 else logger.info
+                            )
+                            log_fn(
+                                "[KLD7] Stream health (%s): %.1f Hz over "
+                                "last %.0fs (total=%d)",
+                                self.orientation, hz, elapsed, frame_count,
+                            )
+                            last_health_t = now
+                            last_health_count = frame_count
 
                 if not self._running:
                     break
@@ -411,11 +436,7 @@ class KLD7Tracker:
         """
         frames = []
         for frame in self._ring_buffer:
-            entry = {
-                "timestamp": frame.timestamp,
-                "tdat": frame.tdat,
-                "pdat": frame.pdat,
-            }
+            entry = {"timestamp": frame.timestamp}
             if frame.radc is not None:
                 entry["has_radc"] = True
             frames.append(entry)

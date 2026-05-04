@@ -248,6 +248,31 @@ def radar_launch_is_plausible(
     }
 
 
+# K-LD7 produces ~34 RADC frames/sec at 3 Mbaud. With buffer_seconds=6
+# the steady-state buffer is ~204 frames. If the snapshot at shot time
+# is dramatically less than that, the radar's stream rate dropped.
+# Surface as WARN so cabling/USB issues are visible without a replay.
+_KLD7_FRAME_HZ = 34.0
+_KLD7_BUFFER_SECONDS = 6.0
+_KLD7_BUFFER_UNDERFILL_FRAC = 0.5
+
+
+def _warn_if_kld7_buffer_underfilled(orientation: str, frame_count: int) -> None:
+    """Log a WARNING when the K-LD7 ring-buffer snapshot is far below
+    the expected steady-state size at shot time.
+    """
+    expected = int(_KLD7_FRAME_HZ * _KLD7_BUFFER_SECONDS)
+    if expected <= 0 or frame_count <= 0:
+        return
+    if frame_count < expected * _KLD7_BUFFER_UNDERFILL_FRAC:
+        logger.warning(
+            "[SERVER] K-LD7 %s buffer underfilled: %d/%d frames (%.0f%%) — "
+            "stream rate dropped, check USB cabling and contention.",
+            orientation, frame_count, expected,
+            100.0 * frame_count / expected,
+        )
+
+
 def shot_to_dict(shot: Shot) -> dict:
     """Convert Shot to JSON-serializable dict."""
     return {
@@ -927,6 +952,7 @@ def on_shot_detected(shot: Shot):
             # --- Vertical K-LD7 (launch angle) ---
             if kld7_vertical:
                 raw_buffer = kld7_vertical.snapshot_buffer()
+                _warn_if_kld7_buffer_underfilled("vertical", len(raw_buffer))
                 kld7_angle = kld7_vertical.get_angle_for_shot(
                     shot_timestamp=shot_ts,
                     ball_speed_mph=shot.ball_speed_mph,
@@ -1002,6 +1028,7 @@ def on_shot_detected(shot: Shot):
             # --- Horizontal K-LD7 (club path / aim direction) ---
             if kld7_horizontal:
                 raw_buffer_h = kld7_horizontal.snapshot_buffer()
+                _warn_if_kld7_buffer_underfilled("horizontal", len(raw_buffer_h))
                 kld7_angle_h = kld7_horizontal.get_angle_for_shot(
                     shot_timestamp=shot_ts,
                     ball_speed_mph=shot.ball_speed_mph,

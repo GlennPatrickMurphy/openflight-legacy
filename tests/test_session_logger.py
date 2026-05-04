@@ -188,8 +188,8 @@ class TestLogKld7Buffer:
             shot_timestamp=1234567890.0,
             orientation="horizontal",
             buffer_frames=[
-                {"timestamp": 1234567889.0, "tdat": None, "pdat": []},
-                {"timestamp": 1234567889.05, "tdat": None, "pdat": []},
+                {"timestamp": 1234567889.0, "has_radc": True},
+                {"timestamp": 1234567889.05, "has_radc": True},
             ],
             ball_angle=ball,
             club_angle=club,

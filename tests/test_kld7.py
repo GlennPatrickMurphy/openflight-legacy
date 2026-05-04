@@ -23,8 +23,7 @@ class TestKLD7Types:
     def test_kld7_frame_defaults(self):
         frame = KLD7Frame(timestamp=1000.0)
         assert frame.timestamp == 1000.0
-        assert frame.tdat is None
-        assert frame.pdat == []
+        assert frame.radc is None
 
     def test_kld7_frame_radc_field(self):
         frame = KLD7Frame(timestamp=1000.0)
@@ -58,9 +57,7 @@ class TestKLD7TrackerRingBuffer:
         tracker = self._make_tracker()
         now = time.time()
         for i in range(5):
-            tracker._add_frame(KLD7Frame(
-                timestamp=now + i * 0.03, tdat=None, pdat=[],
-            ))
+            tracker._add_frame(KLD7Frame(timestamp=now + i * 0.03))
         assert len(tracker._ring_buffer) == 5
 
     def test_ring_buffer_max_size(self):
@@ -69,12 +66,12 @@ class TestKLD7TrackerRingBuffer:
         tracker._ring_buffer = __import__('collections').deque(maxlen=10)
         now = time.time()
         for i in range(20):
-            tracker._add_frame(KLD7Frame(timestamp=now + i * 0.03, tdat=None, pdat=[]))
+            tracker._add_frame(KLD7Frame(timestamp=now + i * 0.03))
         assert len(tracker._ring_buffer) == 10
 
     def test_reset_clears_buffer(self):
         tracker = self._make_tracker()
-        tracker._add_frame(KLD7Frame(timestamp=time.time(), tdat=None, pdat=[]))
+        tracker._add_frame(KLD7Frame(timestamp=time.time()))
         assert len(tracker._ring_buffer) == 1
         tracker.reset()
         assert len(tracker._ring_buffer) == 0
@@ -82,16 +79,28 @@ class TestKLD7TrackerRingBuffer:
     def test_snapshot_buffer(self):
         tracker = self._make_tracker()
         now = time.time()
-        tracker._add_frame(KLD7Frame(timestamp=now, tdat={"distance": 1.0, "speed": 5.0, "angle": 0.0, "magnitude": 3000}, pdat=[]))
+        tracker._add_frame(KLD7Frame(timestamp=now, radc=b"\x00" * 3072))
         snap = tracker.snapshot_buffer()
         assert len(snap) == 1
-        assert snap[0]["tdat"]["distance"] == 1.0
+        assert snap[0]["timestamp"] == now
+        assert snap[0]["has_radc"] is True
+        # tdat/pdat are no longer collected and should not appear in snapshot
+        assert "tdat" not in snap[0]
+        assert "pdat" not in snap[0]
+
+    def test_snapshot_buffer_omits_has_radc_when_no_radc(self):
+        tracker = self._make_tracker()
+        now = time.time()
+        tracker._add_frame(KLD7Frame(timestamp=now))
+        snap = tracker.snapshot_buffer()
+        assert len(snap) == 1
+        assert "has_radc" not in snap[0]
 
     def test_returns_none_when_no_detections(self):
         tracker = self._make_tracker()
         now = time.time()
         for i in range(5):
-            tracker._add_frame(KLD7Frame(timestamp=now + i * 0.03, tdat=None, pdat=[]))
+            tracker._add_frame(KLD7Frame(timestamp=now + i * 0.03))
         assert tracker.get_angle_for_shot() is None
 
 
@@ -121,11 +130,7 @@ class TestKLD7RealData:
         for f in raw_frames:
             t = f["timestamp"] - t0
             if 0.4 <= t <= 4.0:
-                tracker._add_frame(KLD7Frame(
-                    timestamp=f["timestamp"],
-                    tdat=f.get("tdat"),
-                    pdat=f.get("pdat", []),
-                ))
+                tracker._add_frame(KLD7Frame(timestamp=f["timestamp"]))
         assert tracker.get_angle_for_shot() is None
 
     def test_quiet_period_produces_no_results(self):
@@ -136,11 +141,7 @@ class TestKLD7RealData:
         for f in raw_frames:
             t = f["timestamp"] - t0
             if 19.0 <= t <= 24.0:
-                tracker._add_frame(KLD7Frame(
-                    timestamp=f["timestamp"],
-                    tdat=f.get("tdat"),
-                    pdat=f.get("pdat", []),
-                ))
+                tracker._add_frame(KLD7Frame(timestamp=f["timestamp"]))
         assert tracker.get_angle_for_shot() is None
 
 
@@ -294,10 +295,7 @@ class TestRADCAngleExtraction:
         now = time.time()
 
         for i in range(3):
-            tracker._add_frame(KLD7Frame(
-                timestamp=now + i * 0.033,
-                pdat=[{"distance": 4.2, "speed": 25.0, "angle": 15.0, "magnitude": 2500}],
-            ))
+            tracker._add_frame(KLD7Frame(timestamp=now + i * 0.033))
 
         result = tracker.get_angle_for_shot(ball_speed_mph=None)
         assert result is None

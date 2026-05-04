@@ -1,16 +1,19 @@
 """Data types for K-LD7 angle radar integration."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
 @dataclass
 class KLD7Frame:
-    """A single frame from the K-LD7 radar stream."""
+    """A single frame from the K-LD7 radar stream.
+
+    Only RADC raw I/Q is collected — TDAT (single-target) and PDAT
+    (CFAR target list) frames are no longer requested from the radar
+    because all detection is done from RADC offline.
+    """
 
     timestamp: float
-    tdat: Optional[dict] = None  # {"distance", "speed", "angle", "magnitude"}
-    pdat: list = field(default_factory=list)  # list of target dicts
     radc: Optional[bytes] = None  # raw 3072-byte ADC payload
 
 

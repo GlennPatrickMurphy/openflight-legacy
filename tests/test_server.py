@@ -374,6 +374,41 @@ class TestRadarLaunchGuard:
         assert implausible_shots == [3, 9, 11]
 
 
+class TestKLD7BufferUnderfillWarning:
+    """The buffer-underfill warning surfaces stream-rate problems in
+    production logs without requiring a replay.
+    """
+
+    def test_full_buffer_does_not_warn(self, caplog):
+        import logging
+        from openflight.server import _warn_if_kld7_buffer_underfilled
+        with caplog.at_level(logging.WARNING, logger="openflight.server"):
+            # Expected ~204; full buffer should not warn.
+            _warn_if_kld7_buffer_underfilled("vertical", 200)
+        warns = [r for r in caplog.records if "underfilled" in r.message]
+        assert not warns
+
+    def test_underfilled_buffer_warns(self, caplog):
+        import logging
+        from openflight.server import _warn_if_kld7_buffer_underfilled
+        with caplog.at_level(logging.WARNING, logger="openflight.server"):
+            _warn_if_kld7_buffer_underfilled("vertical", 50)  # ~25%
+        warns = [r for r in caplog.records if "underfilled" in r.message]
+        assert warns, "Expected underfill WARNING but got none"
+        assert "vertical" in warns[0].message
+        assert "50/204" in warns[0].message or "50/" in warns[0].message
+
+    def test_empty_buffer_does_not_warn(self, caplog):
+        # frame_count=0 means snapshot wasn't taken or stream hadn't
+        # started; not the underfill case we care about.
+        import logging
+        from openflight.server import _warn_if_kld7_buffer_underfilled
+        with caplog.at_level(logging.WARNING, logger="openflight.server"):
+            _warn_if_kld7_buffer_underfilled("horizontal", 0)
+        warns = [r for r in caplog.records if "underfilled" in r.message]
+        assert not warns
+
+
 class TestOnShotDetected:
     """Tests for live shot processing in the server."""
 
