@@ -10,10 +10,11 @@ import statistics
 import threading
 import time
 from datetime import datetime
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 from ..launch_monitor import ClubType, Shot, estimate_carry_distance
-from ..ops243 import OPS243Radar, SpeedReading
+from ..monitor_base import BaseMonitor
+from ..ops243 import OPS243Radar
 from ..session_logger import get_session_logger
 from .processor import RollingBufferProcessor
 from .trigger import create_trigger
@@ -203,7 +204,7 @@ def estimate_carry_with_spin(
     return adjusted_carry
 
 
-class RollingBufferMonitor:
+class RollingBufferMonitor(BaseMonitor):
     """
     Golf Launch Monitor using rolling buffer mode.
 
@@ -230,6 +231,8 @@ class RollingBufferMonitor:
         monitor.disconnect()
     """
 
+    mode = "rolling-buffer"
+
     def __init__(
         self,
         port: Optional[str] = None,
@@ -249,18 +252,12 @@ class RollingBufferMonitor:
                 - "manual": External trigger for testing
             **trigger_kwargs: Arguments for trigger strategy
         """
+        super().__init__()
         self.radar = OPS243Radar(port=port)
         self.processor = RollingBufferProcessor(sample_rate=sample_rate_ksps * 1000)
         self.trigger_type = trigger_type
         self.sample_rate_ksps = sample_rate_ksps
         self.trigger = create_trigger(trigger_type, **trigger_kwargs)
-
-        self._running = False
-        self._capture_thread: Optional[threading.Thread] = None
-        self._shot_callback: Optional[Callable[[Shot], None]] = None
-        self._live_callback: Optional[Callable[[SpeedReading], None]] = None
-        self._shots: List[Shot] = []
-        self._current_club: ClubType = ClubType.DRIVER
 
     def connect(self) -> bool:
         """
@@ -322,39 +319,16 @@ class RollingBufferMonitor:
         """Get radar module information."""
         return self.radar.get_info()
 
-    def start(
-        self,
-        shot_callback: Optional[Callable[[Shot], None]] = None,
-        live_callback: Optional[Callable[[SpeedReading], None]] = None,
-        diagnostic_callback: Optional[Callable[[dict], None]] = None,
-    ):
-        """
-        Start monitoring for shots.
-
-        Args:
-            shot_callback: Called when a complete shot is detected
-            live_callback: Called for live readings (limited in rolling buffer mode)
-            diagnostic_callback: Called with trigger diagnostic data for UI display
-        """
-        self._shot_callback = shot_callback
-        self._live_callback = live_callback
-        self._diagnostic_callback = diagnostic_callback
-        self._running = True
-
+    def _start_capture(self) -> None:
         self._capture_thread = threading.Thread(
             target=self._capture_loop,
             daemon=True,
         )
         self._capture_thread.start()
-
         logger.info("[MONITOR] Rolling buffer monitor started (trigger: %s)", self.trigger_type)
 
-    def stop(self):
-        """Stop monitoring."""
-        self._running = False
-        if self._capture_thread:
-            self._capture_thread.join(timeout=5.0)
-            self._capture_thread = None
+    def stop(self) -> None:
+        super().stop()
         logger.info("[MONITOR] Rolling buffer monitor stopped")
 
     def _emit_diagnostics(self, wall_clock_ms: float = 0):
@@ -898,24 +872,4 @@ class RollingBufferMonitor:
             "mode": "rolling-buffer",
         }
 
-    def get_shots(self) -> List[Shot]:
-        """Get all detected shots."""
-        return self._shots.copy()
-
-    def clear_session(self):
-        """Clear all recorded shots."""
-        self._shots = []
-
-    def set_club(self, club: ClubType):
-        """Set the current club for future shots."""
-        self._current_club = club
-
-    def __enter__(self):
-        """Context manager entry."""
-        self.connect()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.disconnect()
-        return False
+    # get_shots / clear_session / set_club / __enter__ / __exit__ provided by BaseMonitor

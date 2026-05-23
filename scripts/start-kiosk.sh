@@ -14,8 +14,8 @@ MOCK_MODE=false
 RADAR_LOG=false
 DEBUG_MODE=false
 NO_CAMERA=true  # Camera disabled by default (K-LD7 radar handles angle)
-# Rolling buffer mode is the only mode (streaming mode removed)
-TRIGGER="sound"  # Default: hardware sound trigger (SEN-14262 → HOST_INT)
+RADAR_MODE="legacy"  # Default: streaming speed mode (OPS243 firmware <1.2.3 supported)
+TRIGGER="sound"  # Default trigger for rolling-buffer mode (ignored in legacy)
 SOUND_PRE_TRIGGER=""
 BUFFER_SPLIT=""
 KLD7=false
@@ -61,7 +61,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --mode)
-            echo "Warning: --mode is deprecated, rolling-buffer is the only mode"
+            RADAR_MODE="$2"
             shift 2
             ;;
         --trigger)
@@ -192,6 +192,10 @@ if [ "$NO_CAMERA" = true ]; then
     SERVER_CMD="$SERVER_CMD --no-camera"
 fi
 
+if [ -n "$RADAR_MODE" ]; then
+    SERVER_CMD="$SERVER_CMD --mode $RADAR_MODE"
+fi
+
 if [ -n "$TRIGGER" ]; then
     SERVER_CMD="$SERVER_CMD --trigger $TRIGGER"
 fi
@@ -247,7 +251,8 @@ if [ "$MOCK_MODE" = true ]; then
     log "Starting OpenFlight server on port $PORT (MOCK MODE)..."
 else
     log "Starting OpenFlight server on port $PORT..."
-    if [ -n "$TRIGGER" ]; then
+    log "Radar mode: $RADAR_MODE"
+    if [ "$RADAR_MODE" = "rolling-buffer" ] && [ -n "$TRIGGER" ]; then
         log "Trigger: $TRIGGER"
     fi
     if [ -n "$SOUND_PRE_TRIGGER" ]; then

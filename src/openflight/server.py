@@ -1400,15 +1400,19 @@ def start_monitor(
     debug: bool = False,
     trigger_kwargs: Optional[dict] = None,
     sample_rate_ksps: int = 30,
+    radar_mode: str = "legacy",
 ):
     """
-    Start the launch monitor in rolling buffer mode.
+    Start the launch monitor.
 
     Args:
         port: Serial port for radar
         mock: Run in mock mode without radar
-        trigger_type: Trigger strategy (sound, speed, polling)
+        trigger_type: Trigger strategy (sound, speed, polling) for rolling buffer mode
         debug: Enable verbose debug output
+        radar_mode: "legacy" (streaming speed, works with OPS243 firmware
+            <1.2.3, default) or "rolling-buffer" (requires firmware 1.2.3+
+            with GC mode support).
     """
     global monitor, mock_mode  # pylint: disable=global-statement
 
@@ -1421,8 +1425,16 @@ def start_monitor(
     if mock:
         # Mock mode for testing without radar
         monitor = MockLaunchMonitor()
-    else:
-        from .rolling_buffer import RollingBufferMonitor
+        active_mode = "mock"
+    elif radar_mode == "legacy":
+        # pylint: disable=import-outside-toplevel
+        from .legacy_speed_monitor import LegacySpeedMonitor
+
+        monitor = LegacySpeedMonitor(port=port)
+        print("[MODE] Legacy speed-streaming mode (OPS243 firmware <1.2.3 supported)")
+        active_mode = "streaming"
+    elif radar_mode == "rolling-buffer":
+        from .rolling_buffer import RollingBufferMonitor  # pylint: disable=import-outside-toplevel
 
         monitor = RollingBufferMonitor(
             port=port,
@@ -1433,11 +1445,14 @@ def start_monitor(
         print(
             f"[MODE] Rolling buffer mode (trigger: {trigger_type}, sample_rate: {sample_rate_ksps}ksps)"
         )
+        active_mode = "rolling-buffer"
+    else:
+        raise ValueError(f"Unknown radar_mode: {radar_mode!r}")
 
     monitor.connect()
 
     logger.info("[SERVER] Starting monitor: mode=%s, trigger=%s, sample_rate=%dksps",
-                "mock" if mock else "rolling-buffer", trigger_type, sample_rate_ksps)
+                active_mode, trigger_type, sample_rate_ksps)
 
     # Start session logging
     session_logger = get_session_logger()
@@ -1449,8 +1464,8 @@ def start_monitor(
             camera_enabled=camera is not None,
             camera_model="hough" if (camera_tracker and camera_tracker.use_hough) else None,
             config=radar_config.copy(),
-            mode="mock" if mock else "rolling-buffer",
-            trigger_type=trigger_type if not mock else None,
+            mode=active_mode,
+            trigger_type=trigger_type if not mock and radar_mode == "rolling-buffer" else None,
         )
         if not mock and radar_info:
             session_logger.log_connection(
@@ -1761,10 +1776,20 @@ def main():
     )
     parser.add_argument("--no-logging", action="store_true", help="Disable session logging")
     parser.add_argument(
+        "--mode",
+        choices=["legacy", "rolling-buffer"],
+        default="legacy",
+        help=(
+            "Radar processing mode. 'legacy' (default) uses streaming "
+            "speed readings and works with OPS243 firmware <1.2.3. "
+            "'rolling-buffer' uses GC mode and requires firmware 1.2.3+."
+        ),
+    )
+    parser.add_argument(
         "--trigger",
         choices=["polling", "threshold", "speed", "sound"],
         default="polling",
-        help="Trigger strategy (default: polling)",
+        help="Trigger strategy for rolling-buffer mode (default: polling). Ignored in legacy mode.",
     )
     parser.add_argument(
         "--sound-pre-trigger",
@@ -1899,6 +1924,7 @@ def main():
         debug=args.debug,
         trigger_kwargs=trigger_kwargs,
         sample_rate_ksps=args.sample_rate,
+        radar_mode=args.mode,
     )
 
     if args.mock:
