@@ -538,8 +538,16 @@ class OPS243Radar:
             print(f"[SERIAL] {line!r}")
 
         try:
-            if self._json_mode and line.startswith('{'):
+            # Always handle JSON if it looks like JSON, regardless of
+            # _json_mode. The radar emits status / event JSON (e.g.
+            # {"DetectedObject":"Present"}) that we want to skip
+            # silently rather than treat as a parse error.
+            if line.startswith('{'):
                 data = json.loads(line)
+                if 'speed' not in data:
+                    # Non-speed event (object sensor, status). Not a
+                    # reading; nothing to do here.
+                    return None
                 speed_data = data.get('speed', 0)
                 magnitude_data = data.get('magnitude')
 

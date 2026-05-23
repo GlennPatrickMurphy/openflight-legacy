@@ -250,10 +250,21 @@ class LegacySpeedMonitor(BaseMonitor):
 
     def connect(self) -> bool:
         self.radar.connect()
-        # In legacy mode we don't try to enter rolling-buffer (GC).
-        # The radar boots in continuous-speed mode and that is exactly
-        # what we want — just make sure units are mph if the API
-        # supports it. Older firmwares may not, so swallow errors.
+        # Force the radar back to standard speed mode (CW). The user
+        # may have persisted an alternate mode (object sensor on GPIO,
+        # for instance — the OPS243 1.2.2 firmware's GC command does
+        # that instead of rolling buffer, so any prior --setup run
+        # leaves the radar emitting {"DetectedObject":...} events
+        # instead of speed values).
+        if hasattr(self.radar, "serial") and self.radar.serial is not None:
+            try:
+                self.radar.serial.write(b"GS")
+                time.sleep(0.2)
+                self.radar.serial.reset_input_buffer()
+                logger.info("[LEGACY] Sent GS — radar set to standard speed mode")
+            except Exception:  # pylint: disable=broad-except
+                logger.debug("[LEGACY] GS write failed", exc_info=True)
+        # Best-effort mph units; ignore on older firmwares.
         try:
             from .ops243 import SpeedUnit  # pylint: disable=import-outside-toplevel
             self.radar.set_units(SpeedUnit.MPH)
