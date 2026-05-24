@@ -1401,6 +1401,7 @@ def start_monitor(
     trigger_kwargs: Optional[dict] = None,
     sample_rate_ksps: int = 30,
     radar_mode: str = "legacy",
+    legacy_kwargs: Optional[dict] = None,
 ):
     """
     Start the launch monitor.
@@ -1430,8 +1431,10 @@ def start_monitor(
         # pylint: disable=import-outside-toplevel
         from .legacy_speed_monitor import LegacySpeedMonitor
 
-        monitor = LegacySpeedMonitor(port=port)
+        monitor = LegacySpeedMonitor(port=port, **(legacy_kwargs or {}))
         print("[MODE] Legacy speed-streaming mode (OPS243 firmware <1.2.3 supported)")
+        if legacy_kwargs:
+            print(f"[MODE]   legacy tuning: {legacy_kwargs}")
         active_mode = "streaming"
     elif radar_mode == "rolling-buffer":
         from .rolling_buffer import RollingBufferMonitor  # pylint: disable=import-outside-toplevel
@@ -1792,6 +1795,15 @@ def main():
         help="Trigger strategy for rolling-buffer mode (default: polling). Ignored in legacy mode.",
     )
     parser.add_argument(
+        "--min-ball-speed",
+        type=float,
+        default=None,
+        help=(
+            "Legacy mode: minimum speed (mph) that counts as a shot. "
+            "Default 35. Lower for hand-wave testing (e.g. 10)."
+        ),
+    )
+    parser.add_argument(
         "--sound-pre-trigger",
         type=int,
         default=16,
@@ -1917,6 +1929,10 @@ def main():
             print("ERROR: K-LD7 horizontal requested but failed to connect. Exiting.")
             sys.exit(1)
 
+    legacy_kwargs = {}
+    if args.min_ball_speed is not None:
+        legacy_kwargs["min_ball_speed_mph"] = args.min_ball_speed
+
     start_monitor(
         port=args.port,
         mock=args.mock,
@@ -1925,6 +1941,7 @@ def main():
         trigger_kwargs=trigger_kwargs,
         sample_rate_ksps=args.sample_rate,
         radar_mode=args.mode,
+        legacy_kwargs=legacy_kwargs,
     )
 
     if args.mock:
