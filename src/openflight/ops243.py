@@ -47,6 +47,19 @@ def set_show_raw_readings(enabled: bool):
     _show_raw_readings = enabled
 
 
+def _looks_like_number(s: str) -> bool:
+    """True if ``s`` parses as a signed decimal number (e.g. ``-0.06``).
+
+    Cheap heuristic used by the streaming reader to recognise plain-text
+    speed lines that the radar emits when JSON output is unavailable
+    (older firmwares ignore ``OJ``).
+    """
+    if not s:
+        return False
+    head = s[1:] if s[0] in "+-" else s
+    return bool(head) and head.replace(".", "", 1).isdigit()
+
+
 class SpeedUnit(Enum):
     """Speed units supported by OPS243-A."""
     MPS = "UM"      # meters per second (default)
@@ -1102,11 +1115,16 @@ class OPS243Radar:
             if not line:
                 return None
 
-            # May have multiple lines - take the last complete one
+            # May have multiple lines - take the last complete one.
+            # Accept both JSON ({"speed":-0.06}) and plain-text floats
+            # (-0.06). Older firmwares (e.g. 1.2.2) ignore OJ and emit
+            # the plain form regardless of what we ask for.
             lines = line.split('\n')
             for candidate in reversed(lines):
                 candidate = candidate.strip()
-                if candidate.startswith('{'):
+                if not candidate:
+                    continue
+                if candidate.startswith('{') or _looks_like_number(candidate):
                     reading = self._parse_reading(candidate)
                     if reading:
                         return reading
