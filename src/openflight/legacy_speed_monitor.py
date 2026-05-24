@@ -264,6 +264,14 @@ class LegacySpeedMonitor(BaseMonitor):
                 logger.info("[LEGACY] Sent GS — radar set to standard speed mode")
             except Exception:  # pylint: disable=broad-except
                 logger.debug("[LEGACY] GS write failed", exc_info=True)
+        # Enable JSON-wrapped output. ``read_speed_nonblocking`` only
+        # parses JSON lines; without OJ the radar emits plain text
+        # floats which the reader silently discards.
+        try:
+            self.radar.enable_json_output(True)
+            logger.info("[LEGACY] Enabled JSON output (OJ)")
+        except Exception:  # pylint: disable=broad-except
+            logger.debug("[LEGACY] enable_json_output failed", exc_info=True)
         # Best-effort mph units; ignore on older firmwares.
         try:
             from .ops243 import SpeedUnit  # pylint: disable=import-outside-toplevel
