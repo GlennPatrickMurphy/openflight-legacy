@@ -264,14 +264,34 @@ class LegacySpeedMonitor(BaseMonitor):
                 logger.info("[LEGACY] Sent GS — radar set to standard speed mode")
             except Exception:  # pylint: disable=broad-except
                 logger.debug("[LEGACY] GS write failed", exc_info=True)
-        # Enable JSON-wrapped output. ``read_speed_nonblocking`` only
-        # parses JSON lines; without OJ the radar emits plain text
-        # floats which the reader silently discards.
+        # Enable JSON-wrapped output. ``read_speed_nonblocking`` is
+        # tolerant of plain text on old firmwares, but JSON is preferred
+        # when available.
         try:
             self.radar.enable_json_output(True)
             logger.info("[LEGACY] Enabled JSON output (OJ)")
         except Exception:  # pylint: disable=broad-except
             logger.debug("[LEGACY] enable_json_output failed", exc_info=True)
+        # Bump the radar to a faster report rate. The default at boot
+        # is 10ksps / 1024-sample buffer, which gives only ~10 reports
+        # per second — a golf swing through the beam (~50-100 ms) might
+        # only produce a single reading. We use single-character
+        # commands that work on firmware 1.2.2:
+        #   S2  → 20 ksps  (max detectable speed ~139 mph)
+        #   S(  → 128-sample buffer (smaller = faster reports)
+        # Together these give ~70-150 reports per second, enough to
+        # catch multiple readings per swing. Failures are silenced for
+        # firmwares that reject these commands.
+        try:
+            self.radar.set_sample_rate(20000)
+            logger.info("[LEGACY] Sample rate -> 20 ksps (max ~139 mph)")
+        except Exception:  # pylint: disable=broad-except
+            logger.debug("[LEGACY] set_sample_rate(20000) failed", exc_info=True)
+        try:
+            self.radar.set_buffer_size(128)
+            logger.info("[LEGACY] Buffer size -> 128 (faster reports)")
+        except Exception:  # pylint: disable=broad-except
+            logger.debug("[LEGACY] set_buffer_size(128) failed", exc_info=True)
         # Best-effort mph units; ignore on older firmwares.
         try:
             from .ops243 import SpeedUnit  # pylint: disable=import-outside-toplevel
